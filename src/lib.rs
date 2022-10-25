@@ -330,22 +330,26 @@ impl BMP180CalibrationCoefficients
     }
 }
 
+// https://stackoverflow.com/questions/31215139/how-can-integer-overflow-protection-be-turned-off
+// https://github.com/grame-cncm/faust/issues/432#issuecomment-1250330833
+// arithmatic overflow is intentional here since we are doing bit shifting
+// is this really working? or I have to use `wrapping`
+#[allow(arithmetic_overflow)]
 fn calculate_real_pressure(padc: i32, b5: i32, coeff: BMP180CalibrationCoefficients, oss: BMP180PressureMode) -> f32 {
-   
-    let b6: i32 = b5 - 4000i32;
+    let b6 = b5 - 4000i32;
 
-    let _t = (b6 as i32).pow(2) >> 12;
-    let mut x1: i32 = (coeff.b2 as i32 * _t) >> 11;
-    let mut x2: i32 = (coeff.ac2 as i32 * b6) >> 11;
-    let x3: u32 = (x1 + x2) as u32;
-    let b3: i32 = (((coeff.ac1 as i32 * 4 + (x3 as i32)) << oss.get_mode_value()) + 2) / 4;
-    x1 = (coeff.ac3 as i32 * b6) >> 13;
-    x2 = (coeff.b1 as i32 * _t) >> 16;
+    let _t = b6.pow(2) >> 12;
+    let mut x1: i32 = ((coeff.b2 as i32).wrapping_mul(_t)) >> 11;
+    let mut x2: i32 = ((coeff.ac2 as i32).wrapping_mul(b6)) >> 11;
+    let x3: u32 = (x1.wrapping_add(x2)) as u32;
+    let b3: i32 = ((((coeff.ac1 as i32).wrapping_mul(4).wrapping_add(x3 as i32)) << oss.get_mode_value()) + 2) / 4;
+    x1 = ((coeff.ac3 as i32).wrapping_mul(b6)) >> 13;
+    x2 = ((coeff.b1 as i32).wrapping_mul(_t)) >> 16;
     let x3: i32 = (x1 + x2 + 2) >> 2;
 
     let _x3: u32 = (x3 + 32768i32) as u32;
-    let b4: u32 = (coeff.ac4 as u32 * _x3) >> 15;
-    let b7: u32 = (padc - b3) as u32 * (50000 >> oss.get_mode_value());
+    let b4: u32 = ((coeff.ac4 as u32).wrapping_mul(_x3)) >> 15;
+    let b7: u32 = ((padc - b3) as u32).wrapping_mul(50000 >> oss.get_mode_value());
     let p = if b7 < 0x80000000 {
         (b7 << 1) / b4
     } else {
