@@ -290,6 +290,15 @@ where
         self.pressure_pa() / 100_f32
     }
 
+    /// Return measured pressure in hectopascal with validation
+    pub fn maybe_pressure_hpa(&mut self) -> Result<f32, f32> {
+        let val = self.maybe_pressure_pa();
+        match val {
+            Ok(val) => Ok(val / 100_f32),
+            Err(val) => Err(val / 100_f32),
+        }
+    }
+
     /// Return measured pressure in kilopascal
     pub fn pressure_kpa(&mut self) -> f32 {
         return self.pressure_pa() / 1000_f32;
