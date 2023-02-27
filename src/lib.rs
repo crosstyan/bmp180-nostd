@@ -30,21 +30,19 @@
 
 //! use cortex_m;
 
-
 //! use stm32f4::stm32f411::I2C1;
 
 //! use stm32f4xx_hal as hal;
 
 //! use bmp180_nostd as bmp180;
 
-
 //! use crate::hal::{
-//!     pac, 
+//!     pac,
 //!     pac::{Peripherals},
 //!     i2c::I2c,
-//!     block, 
-//!     prelude::*, 
-//!     serial::config::Config, 
+//!     block,
+//!     prelude::*,
+//!     serial::config::Config,
 //!     serial::Serial, serial::*,
 //!     gpio,
 //!     gpio::{
@@ -57,7 +55,6 @@
 
 //! #[macro_use]
 //! extern crate alloc;
-
 
 //! type I2C1Bus = I2c<I2C1, (stm32f4xx_hal::gpio::Pin<Alternate<OpenDrain, 4_u8>, 'B', 8_u8>, stm32f4xx_hal::gpio::Pin<Alternate<OpenDrain, 4_u8>, 'B', 9_u8>)>;
 
@@ -93,11 +90,10 @@
 //!         .internal_pull_up(true)
 //!         .set_open_drain();
 
-
 //!     delayObj.delay_ms(100 as u32);
 
 //!     let i2c = I2c::new(dp.I2C1, (scl, sda), 100.kHz(), &clocks); //100 kHz I2C Bus speed
-    
+
 //!     let mut boxy: Box<dyn embedded_hal::blocking::delay::DelayMs<u32>+ core::marker::Send> = Box::new(delayObj);
 
 //!     // The bus is a 'static reference -> it lives forever and references can be
@@ -121,9 +117,10 @@
 
 extern crate alloc;
 
-use embedded_hal as hal;
 use alloc::boxed::Box;
-use byteorder::{ByteOrder, BigEndian};
+use anyhow::{anyhow, Result};
+use byteorder::{BigEndian, ByteOrder};
+use embedded_hal as hal;
 
 /// BMP180 Default device address
 pub const BMP180_I2C_ADDR: u8 = 0x77;
@@ -153,7 +150,7 @@ pub enum Error<E> {
 }
 
 /// BMP180 Hardware pressure sampling accuracy modes.
-#[derive(Copy,Clone)]
+#[derive(Copy, Clone)]
 pub enum BMP180PressureMode {
     /// Ultra Low Power mode. Internal number of samples: 1, Max conversion time: 4.5ms, Current: 3uA, RMS noise: 0.06 hPa, 0.5m.
     BMP180UltraLowPower,
@@ -186,7 +183,7 @@ impl BMP180PressureMode {
     }
 }
 ///Calibration coefficients
-#[derive(Copy,Clone)]
+#[derive(Copy, Clone)]
 pub struct BMP180CalibrationCoefficients {
     ac1: i16,
     ac2: i16,
@@ -210,9 +207,9 @@ pub struct BMP180RawReading {
 //  #[derive(Clone)]
 #[allow(non_snake_case)]
 /// BMP180 sensor struct
-pub struct BMP180BarometerThermometer< I2C>
-where 
-    I2C:hal::blocking::i2c::WriteRead + hal::blocking::i2c::Write + hal::blocking::i2c::Read,
+pub struct BMP180BarometerThermometer<I2C>
+where
+    I2C: hal::blocking::i2c::WriteRead + hal::blocking::i2c::Write + hal::blocking::i2c::Read,
 {
     /// Holds I2C bus
     pub i2c: I2C,
@@ -225,12 +222,16 @@ where
 }
 
 #[allow(non_snake_case)]
-impl< I2C> BMP180BarometerThermometer< I2C>
+impl<I2C> BMP180BarometerThermometer<I2C>
 where
     I2C: hal::blocking::i2c::WriteRead + hal::blocking::i2c::Write + hal::blocking::i2c::Read,
 {
     /// Create sensor accessor for BMP180 on the provided i2c bus path
-    pub fn new(mut i2c: I2C, delayObj: Box<dyn embedded_hal::blocking::delay::DelayMs<u32>+ core::marker::Send>, pressure_precision: BMP180PressureMode) -> BMP180BarometerThermometer<I2C> {
+    pub fn new(
+        mut i2c: I2C,
+        delayObj: Box<dyn embedded_hal::blocking::delay::DelayMs<u32> + core::marker::Send>,
+        pressure_precision: BMP180PressureMode,
+    ) -> BMP180BarometerThermometer<I2C> {
         let coeff = BMP180CalibrationCoefficients::new(&mut i2c);
         BMP180BarometerThermometer {
             i2c: i2c,
@@ -240,68 +241,81 @@ where
         }
     }
     /// Return measured pressure in pascals
-    pub fn pressure_pa(&mut self) -> f32 {
-        let reading = &self.BMP180RawReading(self.pressure_precision);
+    pub fn pressure_pa(&mut self) -> Result<f32>  {
+        let reading = &self.BMP180RawReading(self.pressure_precision)?;
         let b5 = self.coeff.calculate_b5(reading.tadc);
-        let real_pressure = calculate_real_pressure(reading.padc, b5, self.coeff, self.pressure_precision);
-        return real_pressure as f32
+        let real_pressure =
+            calculate_real_pressure(reading.padc, b5, self.coeff, self.pressure_precision);
+        Ok(real_pressure as f32)
     }
 
     /// Return measured pressure in hectopascal
-    pub fn pressure_hpa(&mut self) -> f32 {
-        self.pressure_pa()  / 100_f32
+    pub fn pressure_hpa(&mut self) -> Result<f32> {
+        let p = self.pressure_pa()?;
+        Ok(p / 100_f32)
     }
 
     /// Return measured pressure in kilopascal
-    pub fn pressure_kpa(&mut self) -> f32 {
-        return self.pressure_pa() / 1000_f32;
+    pub fn pressure_kpa(&mut self) -> Result<f32> {
+        let p = self.pressure_pa()?;
+        Ok(p / 1000_f32)
     }
 
     /// Return measured RAW reading
-    pub fn BMP180RawReading(&mut self, mode: BMP180PressureMode) -> BMP180RawReading {
+    pub fn BMP180RawReading(&mut self, mode: BMP180PressureMode) -> Result<BMP180RawReading> {
         // fist we need read temp needed for further pressure calculations
-        let _ = self.i2c.write(BMP180_I2C_ADDR, &[BMP180_REGISTER_CTL, BMP180_CMD_TEMP]);
+        self.i2c
+            .write(BMP180_I2C_ADDR, &[BMP180_REGISTER_CTL, BMP180_CMD_TEMP])
+            .map_err(|_| anyhow!("write error"))?;
 
         // maximum conversion time is 5ms
-        self.delayObj.delay_ms(50 as u32); //50 is 6ms
+        // self.delayObj.delay_ms(50 as u32); //50 is 6ms
         // thread::sleep(Duration::from_millis(5));
         // Read uncompensated temperature (two registers)
         // i2c gets LittleEndian we need BigEndian
         let mut buf = [0_u8; 2];
-        let _ = self.i2c.write(BMP180_I2C_ADDR, &[BMP180_REGISTER_TEMP_MSB]);
-        let _ = self.i2c.read(BMP180_I2C_ADDR, &mut buf);
+        self.i2c
+            .write_read(BMP180_I2C_ADDR, &[BMP180_REGISTER_TEMP_MSB], &mut buf)
+            .map_err(|_| anyhow!("write read error"))?;
+        // let _ = self.i2c.read(BMP180_I2C_ADDR, &mut buf);
         // we have raw temp data in tadc.
         let tadc: i16 = BigEndian::read_i16(&buf[..]);
         // println!("Raw Temp: {}", tadc);
         // now lets get pressure
         let offset = mode.get_mode_value();
-        let delay = mode.mode_delay();
-        let _ = self.i2c.write(BMP180_I2C_ADDR, &[BMP180_REGISTER_CTL, BMP180_CMD_PRESSURE + (offset << 6)]);
-        self.delayObj.delay_ms((delay * 10) as u32);
+        // let delay = mode.mode_delay();
+        self.i2c
+            .write(
+                BMP180_I2C_ADDR,
+                &[BMP180_REGISTER_CTL, BMP180_CMD_PRESSURE + (offset << 6)],
+            )
+            .map_err(|_| anyhow!("write error"))?;
+        // self.delayObj.delay_ms((delay * 10) as u32);
         let mut p_buf = [0_u8; 3];
-        let _ = self.i2c.write(BMP180_I2C_ADDR, &[BMP180_REGISTER_PRESSURE_MSB]);
-        let _ = self.i2c.read(BMP180_I2C_ADDR, &mut p_buf);
-        let padc: i32 = (((p_buf[0] as i32) << 16) + ((p_buf[1] as i32) << 8) + (p_buf[2] as i32)) >> (8 - (offset as u8));
-        BMP180RawReading {
+        self.i2c
+            .write_read(BMP180_I2C_ADDR, &[BMP180_REGISTER_PRESSURE_MSB], &mut p_buf)
+            .map_err(|_| anyhow!("write read error"))?;
+        // let _ = self.i2c.read(BMP180_I2C_ADDR, &mut p_buf);
+        let padc: i32 = (((p_buf[0] as i32) << 16) + ((p_buf[1] as i32) << 8) + (p_buf[2] as i32))
+            >> (8 - (offset as u8));
+        Ok(BMP180RawReading {
             padc: padc,
             tadc: tadc,
-        }
+        })
     }
     /// Return temperature measurement from BMP180
-    pub fn temperature_celsius(&mut self) -> f32
-        {
-            let reading = &self.BMP180RawReading(self.pressure_precision);
-            let b5 = self.coeff.calculate_b5(reading.tadc);
-            let t = (b5 + 8) >> 4;
-            (t as f32) / 10_f32
-        }
+    pub fn temperature_celsius(&mut self) -> Result<f32>  {
+        let reading = &self.BMP180RawReading(self.pressure_precision)?;
+        let b5 = self.coeff.calculate_b5(reading.tadc);
+        let t = (b5 + 8) >> 4;
+        Ok((t as f32) / 10_f32)
+    }
 }
 
 #[allow(non_snake_case)]
-impl BMP180CalibrationCoefficients 
-{
+impl BMP180CalibrationCoefficients {
     /// Creates struct object that holds factory calibration corefficients
-    pub fn new<I2C>(i2c: &mut I2C) -> BMP180CalibrationCoefficients 
+    pub fn new<I2C>(i2c: &mut I2C) -> BMP180CalibrationCoefficients
     where
         I2C: hal::blocking::i2c::WriteRead + hal::blocking::i2c::Write + hal::blocking::i2c::Read,
     {
@@ -330,8 +344,12 @@ impl BMP180CalibrationCoefficients
     }
 }
 
-fn calculate_real_pressure(padc: i32, b5: i32, coeff: BMP180CalibrationCoefficients, oss: BMP180PressureMode) -> f32 {
-   
+fn calculate_real_pressure(
+    padc: i32,
+    b5: i32,
+    coeff: BMP180CalibrationCoefficients,
+    oss: BMP180PressureMode,
+) -> f32 {
     let b6: i32 = b5 - 4000i32;
 
     let _t = (b6 as i32).pow(2) >> 12;
@@ -358,7 +376,6 @@ fn calculate_real_pressure(padc: i32, b5: i32, coeff: BMP180CalibrationCoefficie
 
     ((p) + ((x1 + x2 + 3791) >> 4)) as f32 // return as Pa
 }
-
 
 // TESTS ARE NOT YET READY.
 
