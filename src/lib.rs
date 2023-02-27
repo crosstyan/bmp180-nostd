@@ -268,8 +268,10 @@ where
             .write(BMP180_I2C_ADDR, &[BMP180_REGISTER_CTL, BMP180_CMD_TEMP])
             .map_err(|_| anyhow!("write error"))?;
 
+        // why 10x?
         // maximum conversion time is 5ms
         // self.delayObj.delay_ms(50 as u32); //50 is 6ms
+        self.delayObj.delay_ms(6); //50 is 6ms
         // thread::sleep(Duration::from_millis(5));
         // Read uncompensated temperature (two registers)
         // i2c gets LittleEndian we need BigEndian
@@ -283,14 +285,15 @@ where
         // println!("Raw Temp: {}", tadc);
         // now lets get pressure
         let offset = mode.get_mode_value();
-        // let delay = mode.mode_delay();
+        let delay = mode.mode_delay();
         self.i2c
             .write(
                 BMP180_I2C_ADDR,
                 &[BMP180_REGISTER_CTL, BMP180_CMD_PRESSURE + (offset << 6)],
             )
             .map_err(|_| anyhow!("write error"))?;
-        // self.delayObj.delay_ms((delay * 10) as u32);
+        // why 10x?
+        self.delayObj.delay_ms((delay * 1) as u32);
         let mut p_buf = [0_u8; 3];
         self.i2c
             .write_read(BMP180_I2C_ADDR, &[BMP180_REGISTER_PRESSURE_MSB], &mut p_buf)
