@@ -113,11 +113,10 @@
 #![allow(dead_code)]
 #![deny(missing_docs)]
 #![deny(warnings)]
-#![no_std]
 
 extern crate alloc;
 
-use alloc::boxed::Box;
+use std::time::Duration;
 use anyhow::{anyhow, Result};
 use byteorder::{BigEndian, ByteOrder};
 use embedded_hal as hal;
@@ -213,8 +212,6 @@ where
 {
     /// Holds I2C bus
     pub i2c: I2C,
-    /// Holds delay object that is used for internal delay.
-    delayObj: Box<dyn embedded_hal::blocking::delay::DelayMs<u32> + core::marker::Send>,
     /// Holds factory calibration coefficients.
     pub coeff: BMP180CalibrationCoefficients,
     /// Holds chosen pressure mode.
@@ -229,20 +226,18 @@ where
     /// Create sensor accessor for BMP180 on the provided i2c bus path
     pub fn new(
         mut i2c: I2C,
-        delayObj: Box<dyn embedded_hal::blocking::delay::DelayMs<u32> + core::marker::Send>,
         pressure_precision: BMP180PressureMode,
     ) -> BMP180BarometerThermometer<I2C> {
         let coeff = BMP180CalibrationCoefficients::new(&mut i2c);
         BMP180BarometerThermometer {
             i2c: i2c,
-            delayObj: delayObj,
             coeff: coeff,
             pressure_precision: pressure_precision,
         }
     }
     /// Return measured pressure in pascals
-    pub fn pressure_pa(&mut self) -> Result<f32>  {
-        let reading = &self.BMP180RawReading(self.pressure_precision)?;
+    pub async fn pressure_pa(&mut self) -> Result<f32>  {
+        let reading = &self.BMP180RawReading(self.pressure_precision).await?;
         let b5 = self.coeff.calculate_b5(reading.tadc);
         let real_pressure =
             calculate_real_pressure(reading.padc, b5, self.coeff, self.pressure_precision);
@@ -250,27 +245,26 @@ where
     }
 
     /// Return measured pressure in hectopascal
-    pub fn pressure_hpa(&mut self) -> Result<f32> {
-        let p = self.pressure_pa()?;
+    pub async fn pressure_hpa(&mut self) -> Result<f32> {
+        let p = self.pressure_pa().await?;
         Ok(p / 100_f32)
     }
 
     /// Return measured pressure in kilopascal
-    pub fn pressure_kpa(&mut self) -> Result<f32> {
-        let p = self.pressure_pa()?;
+    pub async fn pressure_kpa(&mut self) -> Result<f32> {
+        let p = self.pressure_pa().await?;
         Ok(p / 1000_f32)
     }
 
     /// Return measured RAW reading
-    pub fn BMP180RawReading(&mut self, mode: BMP180PressureMode) -> Result<BMP180RawReading> {
+    pub async fn BMP180RawReading(&mut self, mode: BMP180PressureMode) -> Result<BMP180RawReading> {
         // fist we need read temp needed for further pressure calculations
         self.i2c
             .write(BMP180_I2C_ADDR, &[BMP180_REGISTER_CTL, BMP180_CMD_TEMP])
             .map_err(|_| anyhow!("write error"))?;
 
         // maximum conversion time is 5ms
-        // self.delayObj.delay_ms(50 as u32); //50 is 6ms
-        // thread::sleep(Duration::from_millis(5));
+        tokio::time::sleep(Duration::from_millis(5)).await;
         // Read uncompensated temperature (two registers)
         // i2c gets LittleEndian we need BigEndian
         let mut buf = [0_u8; 2];
@@ -283,14 +277,14 @@ where
         // println!("Raw Temp: {}", tadc);
         // now lets get pressure
         let offset = mode.get_mode_value();
-        // let delay = mode.mode_delay();
+        let delay = mode.mode_delay();
         self.i2c
             .write(
                 BMP180_I2C_ADDR,
                 &[BMP180_REGISTER_CTL, BMP180_CMD_PRESSURE + (offset << 6)],
             )
             .map_err(|_| anyhow!("write error"))?;
-        // self.delayObj.delay_ms((delay * 10) as u32);
+        tokio::time::sleep(Duration::from_millis(delay as u64)).await;
         let mut p_buf = [0_u8; 3];
         self.i2c
             .write_read(BMP180_I2C_ADDR, &[BMP180_REGISTER_PRESSURE_MSB], &mut p_buf)
@@ -304,8 +298,8 @@ where
         })
     }
     /// Return temperature measurement from BMP180
-    pub fn temperature_celsius(&mut self) -> Result<f32>  {
-        let reading = &self.BMP180RawReading(self.pressure_precision)?;
+    pub async fn temperature_celsius(&mut self) -> Result<f32>  {
+        let reading = &self.BMP180RawReading(self.pressure_precision).await?;
         let b5 = self.coeff.calculate_b5(reading.tadc);
         let t = (b5 + 8) >> 4;
         Ok((t as f32) / 10_f32)
