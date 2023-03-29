@@ -116,10 +116,10 @@
 
 extern crate alloc;
 
-use std::time::Duration;
 use anyhow::{anyhow, Result};
 use byteorder::{BigEndian, ByteOrder};
 use embedded_hal as hal;
+use std::time::Duration;
 
 /// BMP180 Default device address
 pub const BMP180_I2C_ADDR: u8 = 0x77;
@@ -216,6 +216,7 @@ where
     pub coeff: BMP180CalibrationCoefficients,
     /// Holds chosen pressure mode.
     pub pressure_precision: BMP180PressureMode,
+    last_reading: Option<BMP180RawReading>,
 }
 
 #[allow(non_snake_case)]
@@ -233,31 +234,49 @@ where
             i2c: i2c,
             coeff: coeff,
             pressure_precision: pressure_precision,
+            last_reading: None,
         }
     }
-    /// Return measured pressure in pascals
-    pub async fn pressure_pa(&mut self) -> Result<f32>  {
-        let reading = &self.BMP180RawReading(self.pressure_precision).await?;
-        let b5 = self.coeff.calculate_b5(reading.tadc);
-        let real_pressure =
-            calculate_real_pressure(reading.padc, b5, self.coeff, self.pressure_precision);
-        Ok(real_pressure as f32)
+
+    /// Read raw pressure and temperature from sensor
+    pub async fn update(&mut self) -> Result<()> {
+        let reading = self.raw_reading(self.pressure_precision).await?;
+        self.last_reading = Some(reading);
+        Ok(())
     }
 
-    /// Return measured pressure in hectopascal
-    pub async fn pressure_hpa(&mut self) -> Result<f32> {
-        let p = self.pressure_pa().await?;
-        Ok(p / 100_f32)
+    /// Return measured pressure in pascals
+    ///
+    /// You MUST call `update` before calling this function
+    pub fn pressure_pa(&self) -> Option<f32> {
+        if let Some(reading) = &self.last_reading {
+            let b5 = self.coeff.calculate_b5(reading.tadc);
+            let real_pressure =
+                calculate_real_pressure(reading.padc, b5, self.coeff, self.pressure_precision);
+            Some(real_pressure as f32)
+        } else {
+            None
+        }
+    }
+
+    /// Return measured pressure in hPa
+    ///
+    /// You MUST call `update` before calling this function
+    pub fn pressure_hpa(&mut self) -> Option<f32> {
+        let p = self.pressure_pa()?;
+        Some(p / 100_f32)
     }
 
     /// Return measured pressure in kilopascal
-    pub async fn pressure_kpa(&mut self) -> Result<f32> {
-        let p = self.pressure_pa().await?;
-        Ok(p / 1000_f32)
+    ///
+    /// You MUST call `update` before calling this function
+    pub fn pressure_kpa(&mut self) -> Option<f32> {
+        let p = self.pressure_pa()?;
+        Some(p / 1000_f32)
     }
 
     /// Return measured RAW reading
-    pub async fn BMP180RawReading(&mut self, mode: BMP180PressureMode) -> Result<BMP180RawReading> {
+    async fn raw_reading(&mut self, mode: BMP180PressureMode) -> Result<BMP180RawReading> {
         // fist we need read temp needed for further pressure calculations
         self.i2c
             .write(BMP180_I2C_ADDR, &[BMP180_REGISTER_CTL, BMP180_CMD_TEMP])
@@ -298,11 +317,16 @@ where
         })
     }
     /// Return temperature measurement from BMP180
-    pub async fn temperature_celsius(&mut self) -> Result<f32>  {
-        let reading = &self.BMP180RawReading(self.pressure_precision).await?;
-        let b5 = self.coeff.calculate_b5(reading.tadc);
-        let t = (b5 + 8) >> 4;
-        Ok((t as f32) / 10_f32)
+    /// 
+    /// You MUST call `update` before calling this function
+    pub fn temperature_celsius(&mut self) -> Option<f32> {
+        if let Some(reading) = &self.last_reading {
+            let b5 = self.coeff.calculate_b5(reading.tadc);
+            let t = (b5 + 8) >> 4;
+            Some((t as f32) / 10_f32)
+        } else {
+            None
+        }
     }
 }
 
