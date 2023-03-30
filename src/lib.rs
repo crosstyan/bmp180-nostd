@@ -323,11 +323,8 @@ where
         self.i2c
             .write_read(BMP180_I2C_ADDR, &[BMP180_REGISTER_TEMP_MSB], &mut buf)
             .map_err(|_| anyhow!("write read error"))?;
-        // let _ = self.i2c.read(BMP180_I2C_ADDR, &mut buf);
-        // we have raw temp data in tadc.
+        // temp
         let tadc: i16 = BigEndian::read_i16(&buf[..]);
-        // println!("Raw Temp: {}", tadc);
-        // now lets get pressure
         let offset = mode.get_mode_value();
         let delay = mode.mode_delay();
         self.i2c
@@ -341,7 +338,7 @@ where
         self.i2c
             .write_read(BMP180_I2C_ADDR, &[BMP180_REGISTER_PRESSURE_MSB], &mut p_buf)
             .map_err(|_| anyhow!("write read error"))?;
-        // let _ = self.i2c.read(BMP180_I2C_ADDR, &mut p_buf);
+        // pressure
         let padc: i32 = (((p_buf[0] as i32) << 16) + ((p_buf[1] as i32) << 8) + (p_buf[2] as i32))
             >> (8 - (offset as u8));
         Ok(BMP180RawReading {
