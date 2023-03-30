@@ -254,6 +254,7 @@ where
     pub async fn average_read(&mut self, times: usize) -> anyhow::Result<(Pressure, f32)> {
         let mut temp = 0.0;
         let mut pressure = Pressure::default();
+        assert!(times > 0);
         for _ in 0..times {
             self.update().await?;
             temp += self.temperature_celsius().unwrap();
@@ -270,6 +271,7 @@ where
     ) -> anyhow::Result<(Pressure, f32)> {
         let mut temp = 0.0;
         let mut pressure = Pressure::default();
+        assert!(times > 0);
         for _ in 0..times {
             self.update().await?;
             temp += self.temperature_celsius_with_check()?;
