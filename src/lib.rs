@@ -367,7 +367,7 @@ where
         let temp = self.temperature_celsius();
         if let Some(t) = temp {
             if t > MAX_TEMP || t < MIN_TEMP {
-                Err(anyhow!("value {}℃ out of range", t))
+                Err(anyhow!("value {} Celsius out of range", t))
             } else {
                 Ok(t)
             }
