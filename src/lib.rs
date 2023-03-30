@@ -120,6 +120,8 @@ use anyhow::{anyhow, Result};
 use byteorder::{BigEndian, ByteOrder};
 use embedded_hal as hal;
 use std::time::Duration;
+mod pressure;
+pub use pressure::Pressure;
 
 /// BMP180 Default device address
 pub const BMP180_I2C_ADDR: u8 = 0x77;
@@ -245,34 +247,34 @@ where
         Ok(())
     }
 
+    /// All the `update` and retrieve pressure and temperature in one go
+    /// 
+    /// Would average the readings if `times` is greater than 1.
+    /// Return `(Pressure, Temperature)`
+    pub async fn average_read(&mut self, times:usize) -> anyhow::Result<(Pressure, f32)>{
+        let mut temp = 0.0;
+        let mut pressure = Pressure::default();
+        for _ in 0..times{
+            self.update().await?;
+            temp += self.temperature_celsius().unwrap();
+            pressure += self.pressure().unwrap();
+        }
+        Ok((pressure/times as f32, temp/times as f32))
+    }
+
     /// Return measured pressure in pascals
     ///
     /// You MUST call `update` before calling this function
-    pub fn pressure_pa(&self) -> Option<f32> {
+    pub fn pressure(&self) -> Option<Pressure> {
         if let Some(reading) = &self.last_reading {
             let b5 = self.coeff.calculate_b5(reading.tadc);
             let real_pressure =
                 calculate_real_pressure(reading.padc, b5, self.coeff, self.pressure_precision);
-            Some(real_pressure as f32)
+            let p = Pressure::from_pascal(real_pressure as f32);
+            Some(p)
         } else {
             None
         }
-    }
-
-    /// Return measured pressure in hPa
-    ///
-    /// You MUST call `update` before calling this function
-    pub fn pressure_hpa(&mut self) -> Option<f32> {
-        let p = self.pressure_pa()?;
-        Some(p / 100_f32)
-    }
-
-    /// Return measured pressure in kilopascal
-    ///
-    /// You MUST call `update` before calling this function
-    pub fn pressure_kpa(&mut self) -> Option<f32> {
-        let p = self.pressure_pa()?;
-        Some(p / 1000_f32)
     }
 
     /// Return measured RAW reading
@@ -283,7 +285,7 @@ where
             .map_err(|_| anyhow!("write error"))?;
 
         // maximum conversion time is 5ms
-        tokio::time::sleep(Duration::from_millis(5)).await;
+        tokio::time::sleep(Duration::from_millis(6)).await;
         // Read uncompensated temperature (two registers)
         // i2c gets LittleEndian we need BigEndian
         let mut buf = [0_u8; 2];
