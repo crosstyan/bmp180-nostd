@@ -248,18 +248,34 @@ where
     }
 
     /// All the `update` and retrieve pressure and temperature in one go
-    /// 
+    ///
     /// Would average the readings if `times` is greater than 1.
     /// Return `(Pressure, Temperature)`
-    pub async fn average_read(&mut self, times:usize) -> anyhow::Result<(Pressure, f32)>{
+    pub async fn average_read(&mut self, times: usize) -> anyhow::Result<(Pressure, f32)> {
         let mut temp = 0.0;
         let mut pressure = Pressure::default();
-        for _ in 0..times{
+        for _ in 0..times {
             self.update().await?;
             temp += self.temperature_celsius().unwrap();
             pressure += self.pressure().unwrap();
         }
-        Ok((pressure/times as f32, temp/times as f32))
+        Ok((pressure / times as f32, temp / times as f32))
+    }
+
+    /// same as `average_read` but with error checking
+    /// to prevent getting a ridiculous value
+    pub async fn average_read_with_check(
+        &mut self,
+        times: usize,
+    ) -> anyhow::Result<(Pressure, f32)> {
+        let mut temp = 0.0;
+        let mut pressure = Pressure::default();
+        for _ in 0..times {
+            self.update().await?;
+            temp += self.temperature_celsius_with_check()?;
+            pressure += self.pressure_with_check()?;
+        }
+        Ok((pressure / times as f32, temp / times as f32))
     }
 
     /// Return measured pressure in pascals
@@ -274,6 +290,19 @@ where
             Some(p)
         } else {
             None
+        }
+    }
+
+    /// same as `pressure` but with error checking
+    pub fn pressure_with_check(&self) -> Result<Pressure> {
+        let MAX_HPA = Pressure::from_hpa(1083.8);
+        // with a record low of 870 hPa
+        let MIN_HPA = Pressure::from_hpa(1000.0);
+        let p = self.pressure().ok_or(anyhow!("No pressure reading"))?;
+        if p > MAX_HPA || p < MIN_HPA {
+            Err(anyhow!("value {}hPa out of range", p.hpa()))
+        } else {
+            Ok(p)
         }
     }
 
@@ -318,8 +347,9 @@ where
             tadc: tadc,
         })
     }
+
     /// Return temperature measurement from BMP180
-    /// 
+    ///
     /// You MUST call `update` before calling this function
     pub fn temperature_celsius(&mut self) -> Option<f32> {
         if let Some(reading) = &self.last_reading {
@@ -328,6 +358,22 @@ where
             Some((t as f32) / 10_f32)
         } else {
             None
+        }
+    }
+
+    /// same as `temperature_celsius` but with error checking
+    pub fn temperature_celsius_with_check(&mut self) -> anyhow::Result<f32> {
+        const MAX_TEMP: f32 = 85.0;
+        const MIN_TEMP: f32 = 0.0;
+        let temp = self.temperature_celsius();
+        if let Some(t) = temp {
+            if t > MAX_TEMP || t < MIN_TEMP {
+                Err(anyhow!("value {}℃ out of range", t))
+            } else {
+                Ok(t)
+            }
+        } else {
+            Err(anyhow!("No reading"))
         }
     }
 }
