@@ -299,7 +299,7 @@ where
     pub fn pressure_with_check(&self) -> Result<Pressure> {
         let MAX_HPA = Pressure::from_hpa(1083.8);
         // with a record low of 870 hPa
-        let MIN_HPA = Pressure::from_hpa(1000.0);
+        let MIN_HPA = Pressure::from_hpa(870.0);
         let p = self.pressure().ok_or(anyhow!("No pressure reading"))?;
         if p > MAX_HPA || p < MIN_HPA {
             Err(anyhow!("value {}hPa out of range", p.hpa()))
